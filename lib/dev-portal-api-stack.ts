@@ -97,5 +97,10 @@ export class DevPortalApiStack extends cdk.Stack {
     const vesselPositionalDiscrepancies = voyageInsights.addResource('vessel-positional-discrepancies');
     vesselPositionalDiscrepancies.addResource('{imo}')
       .addMethod('GET', new apigateway.LambdaIntegration(voyageHandler));
+
+    // Vessel Port State Control endpoint
+    const vesselPortStateControl = voyageInsights.addResource('vessel-port-state-control');
+    vesselPortStateControl.addResource('{imo}')
+      .addMethod('GET', new apigateway.LambdaIntegration(voyageHandler));
   }
 }

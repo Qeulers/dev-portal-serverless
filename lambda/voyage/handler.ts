@@ -8,9 +8,6 @@ interface EndpointConfig {
   handler: (event: APIGatewayProxyEvent, accessToken: string) => Promise<APIGatewayProxyResult>;
 }
 
-// Constants
-const VOYAGE_API_BASE_URL = 'https://voyage-insights-api.polestar-production.com/voyage-insights/v1';
-
 // Utility functions
 const extractAccessToken = (event: APIGatewayProxyEvent): string | null => {
   let accessToken = event.headers['Authorization'] || event.headers['authorization'];
@@ -57,7 +54,7 @@ const getVesselPortCalls = async (
   }
 
   const queryParams = event.queryStringParameters || {};
-  const baseUrl = `${VOYAGE_API_BASE_URL}/vessel-port-calls/:imo`;
+  const baseUrl = 'https://zone-service-api.polestar-production.com/voyage-insights/v1/vessel-port-calls/:imo';
   const targetUrl = new URL(baseUrl.replace(':imo', imo));
   
   Object.entries(queryParams).forEach(([key, value]) => {
@@ -90,7 +87,7 @@ const getVesselZoneAndPortEvents = async (
   }
 
   const queryParams = event.queryStringParameters || {};
-  const baseUrl = `${VOYAGE_API_BASE_URL}/vessel-zone-and-port-events/:imo`;
+  const baseUrl = 'https://zone-service-api.polestar-production.com/voyage-insights/v1/vessel-zone-and-port-events/:imo';
   const targetUrl = new URL(baseUrl.replace(':imo', imo));
   
   Object.entries(queryParams).forEach(([key, value]) => {
@@ -123,7 +120,7 @@ const getVesselAisReportingGaps = async (
   }
 
   const queryParams = event.queryStringParameters || {};
-  const baseUrl = `${VOYAGE_API_BASE_URL}/vessel-ais-reporting-gaps/:imo`;
+  const baseUrl = 'https://gap-reporting-api-public.polestar-production.com/voyage-insights/v1/vessel-ais-reporting-gaps/:imo';
   const targetUrl = new URL(baseUrl.replace(':imo', imo));
   
   Object.entries(queryParams).forEach(([key, value]) => {
@@ -156,7 +153,40 @@ const getVesselPositionalDiscrepancies = async (
   }
 
   const queryParams = event.queryStringParameters || {};
-  const baseUrl = `${VOYAGE_API_BASE_URL}/vessel-positional-discrepancies/:imo`;
+  const baseUrl = 'https://ais-spoofing-api-public.polestar-production.com/voyage-insights/v1/vessel-positional-discrepancy/:imo';
+  const targetUrl = new URL(baseUrl.replace(':imo', imo));
+  
+  Object.entries(queryParams).forEach(([key, value]) => {
+    if (value !== undefined) {
+      targetUrl.searchParams.append(key, value);
+    }
+  });
+
+  const response = await axios.get(targetUrl.toString(), {
+    headers: { 'Authorization': `Bearer ${accessToken}` }
+  });
+
+  const responseData = response.data;
+  if (!responseData.meta) {
+    responseData.meta = {};
+  }
+  responseData.meta.status_code = response.status;
+  responseData.meta.status_message = response.statusText;
+
+  return createResponse(response.status, responseData);
+};
+
+const getVesselPortStateControl = async (
+  event: APIGatewayProxyEvent,
+  accessToken: string
+): Promise<APIGatewayProxyResult> => {
+  const imo = event.pathParameters?.imo;
+  if (!imo) {
+    return createResponse(400, { error: 'IMO number is required' });
+  }
+
+  const queryParams = event.queryStringParameters || {};
+  const baseUrl = 'https://psc-api-public.polestar-production.com/voyage-insights/v1/vessel-port-state-control/:imo';
   const targetUrl = new URL(baseUrl.replace(':imo', imo));
   
   Object.entries(queryParams).forEach(([key, value]) => {
@@ -200,6 +230,11 @@ const endpoints: EndpointConfig[] = [
     method: 'GET',
     path: '/voyage-insights/vessel-positional-discrepancies/',
     handler: getVesselPositionalDiscrepancies
+  },
+  {
+    method: 'GET',
+    path: '/voyage-insights/vessel-port-state-control/',
+    handler: getVesselPortStateControl
   }
 ];
 
