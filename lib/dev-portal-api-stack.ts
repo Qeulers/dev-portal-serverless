@@ -29,7 +29,17 @@ export class DevPortalApiStack extends cdk.Stack {
       handler: 'handler'
     });
 
-    // Create API routes - removed 'production' from path
+    const zoneAndPortHandler = new lambda.NodejsFunction(this, 'ZoneAndPortHandler', {
+      entry: path.join(__dirname, '../lambda/zone-and-port/handler.ts'),
+      handler: 'handler'
+    });
+
+    const voyageHandler = new lambda.NodejsFunction(this, 'VoyageHandler', {
+      entry: path.join(__dirname, '../lambda/voyage/handler.ts'),
+      handler: 'handler'
+    });
+
+    // Create API routes
     const auth = api.root.addResource('account');
     
     // Signin endpoint
@@ -45,5 +55,47 @@ export class DevPortalApiStack extends cdk.Stack {
     const vesselCharacteristics = vesselInsights.addResource('vessel-characteristics');
     vesselCharacteristics.addResource('{imo}')
       .addMethod('GET', new apigateway.LambdaIntegration(vesselHandler));
+
+    // Zone and Port endpoints
+    const zoneAndPortInsights = api.root.addResource('zone-and-port-insights');
+    
+    // Zone & Port Traffic endpoint
+    const zoneAndPortTraffic = zoneAndPortInsights.addResource('zone-and-port-traffic');
+    const zoneAndPortTrafficId = zoneAndPortTraffic.addResource('id');
+    zoneAndPortTrafficId.addResource('{id}')
+      .addMethod('GET', new apigateway.LambdaIntegration(zoneAndPortHandler));
+
+    // Vessels in Zone or Port endpoint
+    const vesselsInZoneOrPort = zoneAndPortInsights.addResource('vessels-in-zone-or-port');
+    const vesselsInZoneOrPortId = vesselsInZoneOrPort.addResource('id');
+    vesselsInZoneOrPortId.addResource('{id}')
+      .addMethod('GET', new apigateway.LambdaIntegration(zoneAndPortHandler));
+
+    // Zone & Port List endpoint
+    const zones = zoneAndPortInsights.addResource('zones');
+    zones.addMethod('GET', new apigateway.LambdaIntegration(zoneAndPortHandler));
+
+    // Voyage Insights Routes
+    const voyageInsights = api.root.addResource('voyage-insights');
+    
+    // Vessel Port Calls endpoint
+    const vesselPortCalls = voyageInsights.addResource('vessel-port-calls');
+    vesselPortCalls.addResource('{imo}')
+      .addMethod('GET', new apigateway.LambdaIntegration(voyageHandler));
+
+    // Vessel Zone and Port Events endpoint
+    const vesselZoneAndPortEvents = voyageInsights.addResource('vessel-zone-and-port-events');
+    vesselZoneAndPortEvents.addResource('{imo}')
+      .addMethod('GET', new apigateway.LambdaIntegration(voyageHandler));
+
+    // Vessel AIS Reporting Gaps endpoint
+    const vesselAisReportingGaps = voyageInsights.addResource('vessel-ais-reporting-gaps');
+    vesselAisReportingGaps.addResource('{imo}')
+      .addMethod('GET', new apigateway.LambdaIntegration(voyageHandler));
+
+    // Vessel Positional Discrepancies endpoint
+    const vesselPositionalDiscrepancies = voyageInsights.addResource('vessel-positional-discrepancies');
+    vesselPositionalDiscrepancies.addResource('{imo}')
+      .addMethod('GET', new apigateway.LambdaIntegration(voyageHandler));
   }
 }
