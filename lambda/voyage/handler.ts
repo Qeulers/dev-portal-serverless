@@ -186,7 +186,7 @@ const getVesselPortStateControl = async (
   }
 
   const queryParams = event.queryStringParameters || {};
-  const baseUrl = 'https://psc-api-public.polestar-production.com/voyage-insights/v1/vessel-port-state-control/:imo';
+  const baseUrl = 'https://psc-insp-service-api-public.polestar-production.com/voyage-insights/v1/vessel-port-state-control/:imo';
   const targetUrl = new URL(baseUrl.replace(':imo', imo));
   
   Object.entries(queryParams).forEach(([key, value]) => {
