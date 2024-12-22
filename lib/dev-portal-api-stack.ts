@@ -39,6 +39,11 @@ export class DevPortalApiStack extends cdk.Stack {
       handler: 'handler'
     });
 
+    const zoneAndPortNotificationsHandler = new lambda.NodejsFunction(this, 'ZoneAndPortNotificationsHandler', {
+      entry: path.join(__dirname, '../lambda/zone-and-port-notifications/handler.ts'),
+      handler: 'handler'
+    });
+
     // Create API routes
     const auth = api.root.addResource('account');
     
@@ -102,5 +107,30 @@ export class DevPortalApiStack extends cdk.Stack {
     const vesselPortStateControl = voyageInsights.addResource('vessel-port-state-control');
     vesselPortStateControl.addResource('{imo}')
       .addMethod('GET', new apigateway.LambdaIntegration(voyageHandler));
+
+    // Zone and Port Notification endpoints
+    const notifications = api.root.addResource('notifications');
+    const zoneAndPortNotifications = notifications.addResource('zones-and-ports');
+    
+    // Create subscription
+    zoneAndPortNotifications
+      .addMethod('POST', new apigateway.LambdaIntegration(zoneAndPortNotificationsHandler));
+    
+    // Get all subscriptions
+    zoneAndPortNotifications
+      .addMethod('GET', new apigateway.LambdaIntegration(zoneAndPortNotificationsHandler));
+    
+    // Single subscription operations
+    const zoneAndPortNotificationId = zoneAndPortNotifications.addResource('{id}');
+    zoneAndPortNotificationId
+      .addMethod('GET', new apigateway.LambdaIntegration(zoneAndPortNotificationsHandler));
+    zoneAndPortNotificationId
+      .addMethod('PUT', new apigateway.LambdaIntegration(zoneAndPortNotificationsHandler));
+    zoneAndPortNotificationId
+      .addMethod('DELETE', new apigateway.LambdaIntegration(zoneAndPortNotificationsHandler));
+    
+    // Get notifications for a subscription
+    zoneAndPortNotificationId.addResource('notifications')
+      .addMethod('GET', new apigateway.LambdaIntegration(zoneAndPortNotificationsHandler));
   }
 }
