@@ -2,6 +2,7 @@ import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { DynamoDB } from 'aws-sdk';
 import { v4 as uuidv4 } from 'uuid';
 import axios from 'axios';
+import { getCorsHeaders, createOptionsResponse } from '../utils/cors';
 
 // Initialize DynamoDB client
 const dynamodb = new DynamoDB.DocumentClient();
@@ -38,10 +39,11 @@ interface EndpointConfig {
 }
 
 // Utility functions
-const createResponse = (statusCode: number, body: any, headers = {}): APIGatewayProxyResult => ({
+const createResponse = (statusCode: number, body: any, headers: any = {}, origin?: string) => ({
   statusCode,
   headers: {
     'Content-Type': 'application/json',
+    ...getCorsHeaders(origin),
     ...headers
   },
   body: JSON.stringify(body)
@@ -163,13 +165,13 @@ const storeWebhookNotification = async (
       success: true,
       id: id,
       message: 'Notification stored successfully'
-    });
+    }, {}, event.headers['origin']);
   } catch (error) {
     console.error('Error storing webhook notification:', error);
     return createResponse(500, {
       success: false,
       error: 'Failed to store notification'
-    });
+    }, {}, event.headers['origin']);
   }
 };
 
@@ -235,13 +237,13 @@ const getWebhookNotifications = async (
         ...(subscription_ids && { subscription_ids: subscription_ids.split(',') }),
         ...(timestamp_start && { timestamp_start, timestamp_end }),
       },
-    });
+    }, {}, event.headers['origin']);
   } catch (error) {
     console.error('Error retrieving webhook notifications:', error);
     return createResponse(500, {
       success: false,
       error: 'Failed to retrieve notifications'
-    });
+    }, {}, event.headers['origin']);
   }
 };
 
@@ -286,7 +288,7 @@ const cleanupWebhookNotifications = async (
           success: true,
           deletedCount: result.Items.length,
           message: `Successfully deleted all notifications (${result.Items.length} records)`
-        });
+        }, {}, event.headers['origin']);
       }
     }
 
@@ -294,13 +296,13 @@ const cleanupWebhookNotifications = async (
     return createResponse(200, {
       success: true,
       message: 'Notifications will be automatically cleaned up by TTL after 24 hours'
-    });
+    }, {}, event.headers['origin']);
   } catch (error) {
     console.error('Error cleaning up webhook notifications:', error);
     return createResponse(500, {
       success: false,
       error: 'Failed to cleanup notifications'
-    });
+    }, {}, event.headers['origin']);
   }
 };
 
@@ -325,18 +327,25 @@ const endpoints: EndpointConfig[] = [
 
 // Main handler
 export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
+  const origin = event.headers['origin'];
+  
+  // Handle OPTIONS requests for CORS preflight
+  if (event.httpMethod === 'OPTIONS') {
+    return createOptionsResponse(origin);
+  }
+
   try {
     const endpoint = endpoints.find(
       e => e.method === event.httpMethod && event.path.endsWith(e.path)
     );
 
     if (!endpoint) {
-      return createResponse(404, { error: 'Endpoint not found' });
+      return createResponse(404, { error: 'Endpoint not found' }, {}, origin);
     }
 
     return await endpoint.handler(event);
   } catch (error) {
     console.error('Error in webhook notifications handler:', error);
-    return createResponse(500, { error: 'Internal server error' });
+    return createResponse(500, { error: 'Internal server error' }, {}, origin);
   }
 };

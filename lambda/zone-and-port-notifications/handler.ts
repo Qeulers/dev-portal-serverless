@@ -1,5 +1,6 @@
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import axios, { AxiosError } from 'axios';
+import { getCorsHeaders, createOptionsResponse } from '../utils/cors';
 
 // Types
 interface EndpointConfig {
@@ -23,10 +24,11 @@ const extractAccessToken = (event: APIGatewayProxyEvent): string | null => {
   return accessToken || null;
 };
 
-const createResponse = (statusCode: number, body: any, headers = {}): APIGatewayProxyResult => ({
+const createResponse = (statusCode: number, body: any, headers: any = {}): APIGatewayProxyResult => ({
   statusCode,
   headers: {
     'Content-Type': 'application/json',
+    ...getCorsHeaders(),
     ...headers
   },
   body: JSON.stringify(body)
@@ -218,6 +220,10 @@ const endpoints: EndpointConfig[] = [
 
 // Main handler
 export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
+  if (event.httpMethod === 'OPTIONS') {
+    return createOptionsResponse();
+  }
+
   try {
     const accessToken = extractAccessToken(event);
     if (!accessToken) {

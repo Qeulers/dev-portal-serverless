@@ -1,6 +1,7 @@
 // lambda/auth/handler.ts
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import axios from 'axios';
+import { getCorsHeaders, createOptionsResponse } from '../utils/cors';
 
 // Define API URLs
 const API_URLS = {
@@ -11,6 +12,11 @@ const API_URLS = {
 export const handler = async (
     event: APIGatewayProxyEvent
   ): Promise<APIGatewayProxyResult> => {
+    // Handle OPTIONS requests for CORS preflight
+    if (event.httpMethod === 'OPTIONS') {
+      return createOptionsResponse();
+    }
+
     try {
       // Determine which endpoint to call based on the path
       const isSignin = event.path.endsWith('/signin');
@@ -32,6 +38,7 @@ export const handler = async (
       // Prepare response headers
       const headers: { [key: string]: string } = {
         'Content-Type': 'application/json',
+        ...getCorsHeaders()
       };
   
       // Forward tokens if they exist in the response
@@ -54,13 +61,21 @@ export const handler = async (
       if (axios.isAxiosError(error) && error.response) {
         return {
           statusCode: error.response.status,
+          headers: {
+            'Content-Type': 'application/json',
+            ...getCorsHeaders()
+          },
           body: JSON.stringify(error.response.data)
         };
       }
-  
+      
       // Handle other errors
       return {
         statusCode: 500,
+        headers: {
+          'Content-Type': 'application/json',
+          ...getCorsHeaders()
+        },
         body: JSON.stringify({ error: 'Internal server error' })
       };
     }

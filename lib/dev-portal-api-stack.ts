@@ -4,6 +4,7 @@ import * as apigateway from 'aws-cdk-lib/aws-apigateway';
 import * as lambda from 'aws-cdk-lib/aws-lambda-nodejs';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as path from 'path';
+import { Duration } from 'aws-cdk-lib';
 
 export class DevPortalApiStack extends cdk.Stack {
   constructor(scope: cdk.App, id: string, props?: cdk.StackProps) {
@@ -28,38 +29,62 @@ export class DevPortalApiStack extends cdk.Stack {
     // Create API Gateway
     const api = new apigateway.RestApi(this, 'DevPortalApi', {
       defaultCorsPreflightOptions: {
-        allowOrigins: apigateway.Cors.ALL_ORIGINS,
+        allowOrigins: process.env.ALLOWED_ORIGINS 
+          ? process.env.ALLOWED_ORIGINS.split(',')
+          : ['http://localhost:5173'],
         allowMethods: apigateway.Cors.ALL_METHODS,
-        allowHeaders: ['Content-Type', 'Authorization', 'Access-Token', 'Refresh-Token'],
-        exposeHeaders: ['Access-Token', 'Refresh-Token']
+        allowHeaders: [
+          'Content-Type',
+          'X-Amz-Date',
+          'Authorization',
+          'X-Api-Key',
+          'X-Amz-Security-Token',
+          'Access-Token',
+          'Refresh-Token',
+          'access-token',
+          'refresh-token'
+        ],
+        exposeHeaders: ['Access-Token', 'Refresh-Token', 'access-token', 'refresh-token'],
+        allowCredentials: true,
+        maxAge: Duration.seconds(3600)
       }
     });
+
+    // Common environment variables for all Lambda functions
+    const commonEnvironment = {
+      ALLOWED_ORIGINS: process.env.ALLOWED_ORIGINS || 'http://localhost:5173,*'
+    };
 
     // Create Lambda functions
     const authHandler = new lambda.NodejsFunction(this, 'AuthHandler', {
       entry: path.join(__dirname, '../lambda/auth/handler.ts'),
-      handler: 'handler'
+      handler: 'handler',
+      environment: commonEnvironment
     });
 
     const vesselHandler = new lambda.NodejsFunction(this, 'VesselHandler', {
       entry: path.join(__dirname, '../lambda/vessel/handler.ts'),
-      handler: 'handler'
+      handler: 'handler',
+      environment: commonEnvironment
     });
 
     const zoneAndPortHandler = new lambda.NodejsFunction(this, 'ZoneAndPortHandler', {
       entry: path.join(__dirname, '../lambda/zone-and-port/handler.ts'),
-      handler: 'handler'
+      handler: 'handler',
+      environment: commonEnvironment
     });
 
     const voyageHandler = new lambda.NodejsFunction(this, 'VoyageHandler', {
       entry: path.join(__dirname, '../lambda/voyage/handler.ts'),
-      handler: 'handler'
+      handler: 'handler',
+      environment: commonEnvironment
     });
 
     const zoneAndPortNotificationsHandler = new lambda.NodejsFunction(this, 'ZoneAndPortNotificationsHandler', {
       entry: path.join(__dirname, '../lambda/zone-and-port-notifications/handler.ts'),
       handler: 'handler',
       environment: {
+        ...commonEnvironment,
         NOTIFICATIONS_TABLE: notificationsTable.tableName,
       }
     });
@@ -68,6 +93,7 @@ export class DevPortalApiStack extends cdk.Stack {
       entry: path.join(__dirname, '../lambda/webhook-notifications/handler.ts'),
       handler: 'handler',
       environment: {
+        ...commonEnvironment,
         NOTIFICATIONS_TABLE: notificationsTable.tableName,
         PTE_USERNAME: process.env.PTE_USERNAME || '',
         PTE_API_KEY: process.env.PTE_API_KEY || ''
