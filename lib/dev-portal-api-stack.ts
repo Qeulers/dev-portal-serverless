@@ -2,11 +2,28 @@
 import * as cdk from 'aws-cdk-lib';
 import * as apigateway from 'aws-cdk-lib/aws-apigateway';
 import * as lambda from 'aws-cdk-lib/aws-lambda-nodejs';
+import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as path from 'path';
 
 export class DevPortalApiStack extends cdk.Stack {
   constructor(scope: cdk.App, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
+
+    // Create DynamoDB table for notifications
+    const notificationsTable = new dynamodb.Table(this, 'NotificationsTable', {
+      partitionKey: { name: 'id', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'timestamp', type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      removalPolicy: cdk.RemovalPolicy.DESTROY, // For development - change for production
+      timeToLiveAttribute: 'ttl', // Enable TTL for automatic cleanup
+    });
+
+    // Add GSI for subscription_id queries
+    notificationsTable.addGlobalSecondaryIndex({
+      indexName: 'subscription-index',
+      partitionKey: { name: 'subscription_id', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'timestamp', type: dynamodb.AttributeType.STRING },
+    });
 
     // Create API Gateway
     const api = new apigateway.RestApi(this, 'DevPortalApi', {
@@ -41,8 +58,25 @@ export class DevPortalApiStack extends cdk.Stack {
 
     const zoneAndPortNotificationsHandler = new lambda.NodejsFunction(this, 'ZoneAndPortNotificationsHandler', {
       entry: path.join(__dirname, '../lambda/zone-and-port-notifications/handler.ts'),
-      handler: 'handler'
+      handler: 'handler',
+      environment: {
+        NOTIFICATIONS_TABLE: notificationsTable.tableName,
+      }
     });
+
+    const webhookNotificationsHandler = new lambda.NodejsFunction(this, 'WebhookNotificationsHandler', {
+      entry: path.join(__dirname, '../lambda/webhook-notifications/handler.ts'),
+      handler: 'handler',
+      environment: {
+        NOTIFICATIONS_TABLE: notificationsTable.tableName,
+        PTE_USERNAME: process.env.PTE_USERNAME || '',
+        PTE_API_KEY: process.env.PTE_API_KEY || ''
+      }
+    });
+
+    // Grant Lambda permissions to DynamoDB
+    notificationsTable.grantReadWriteData(zoneAndPortNotificationsHandler);
+    notificationsTable.grantReadWriteData(webhookNotificationsHandler);
 
     // Create API routes
     const auth = api.root.addResource('account');
@@ -132,5 +166,13 @@ export class DevPortalApiStack extends cdk.Stack {
     // Get notifications for a subscription
     zoneAndPortNotificationId.addResource('notifications')
       .addMethod('GET', new apigateway.LambdaIntegration(zoneAndPortNotificationsHandler));
+
+    // Add webhook notifications routes
+    const webhookNotifications = api.root.addResource('webhook-notifications');
+    webhookNotifications.addMethod('POST', new apigateway.LambdaIntegration(webhookNotificationsHandler));
+    webhookNotifications.addMethod('GET', new apigateway.LambdaIntegration(webhookNotificationsHandler));
+    
+    const cleanup = webhookNotifications.addResource('cleanup');
+    cleanup.addMethod('DELETE', new apigateway.LambdaIntegration(webhookNotificationsHandler));
   }
 }
