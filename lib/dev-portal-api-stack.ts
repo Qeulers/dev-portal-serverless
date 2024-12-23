@@ -2,7 +2,10 @@
 import * as cdk from 'aws-cdk-lib';
 import * as apigateway from 'aws-cdk-lib/aws-apigateway';
 import * as lambda from 'aws-cdk-lib/aws-lambda-nodejs';
+import * as awsLambda from 'aws-cdk-lib/aws-lambda';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
+import * as appsync from '@aws-cdk/aws-appsync-alpha';
+import * as iam from 'aws-cdk-lib/aws-iam';
 import * as path from 'path';
 import { Duration } from 'aws-cdk-lib';
 
@@ -17,6 +20,7 @@ export class DevPortalApiStack extends cdk.Stack {
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
       removalPolicy: cdk.RemovalPolicy.DESTROY, // For development - change for production
       timeToLiveAttribute: 'ttl', // Enable TTL for automatic cleanup
+      stream: dynamodb.StreamViewType.NEW_AND_OLD_IMAGES,
     });
 
     // Add GSI for subscription_id queries
@@ -24,6 +28,57 @@ export class DevPortalApiStack extends cdk.Stack {
       indexName: 'subscription-index',
       partitionKey: { name: 'subscription_id', type: dynamodb.AttributeType.STRING },
       sortKey: { name: 'timestamp', type: dynamodb.AttributeType.STRING },
+    });
+
+    // Create AppSync API
+    const appSyncApi = new appsync.GraphqlApi(this, 'NotificationsApi', {
+      name: 'NotificationsApi',
+      schema: appsync.SchemaFile.fromAsset(path.join(__dirname, 'schema.graphql')),
+      authorizationConfig: {
+        defaultAuthorization: {
+          authorizationType: appsync.AuthorizationType.API_KEY,
+          apiKeyConfig: {
+            expires: cdk.Expiration.after(cdk.Duration.days(365))
+          }
+        },
+      },
+      xrayEnabled: true,
+    });
+
+    // Create DynamoDB Data Source
+    const notificationsDS = appSyncApi.addDynamoDbDataSource(
+      'NotificationsDataSource',
+      notificationsTable
+    );
+
+    // Create Lambda function to process DynamoDB Streams
+    const streamHandler = new lambda.NodejsFunction(this, 'StreamHandler', {
+      entry: path.join(__dirname, '../lambda/streamHandler.ts'),
+      handler: 'handler',
+      runtime: awsLambda.Runtime.NODEJS_18_X,
+      environment: {
+        APPSYNC_API_ENDPOINT: appSyncApi.graphqlUrl,
+        APPSYNC_API_KEY: appSyncApi.apiKey!,
+      },
+    });
+
+    // Grant the Lambda function permissions to read from DynamoDB Streams
+    notificationsTable.grantStreamRead(streamHandler);
+
+    // Grant the Lambda function permissions to publish to AppSync
+    streamHandler.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['appsync:GraphQL'],
+        resources: [`${appSyncApi.arn}/types/Mutation/*`],
+      })
+    );
+
+    // Create DynamoDB Stream Event Source
+    new awsLambda.EventSourceMapping(this, 'StreamEventSource', {
+      target: streamHandler,
+      batchSize: 100,
+      startingPosition: awsLambda.StartingPosition.LATEST,
+      eventSourceArn: notificationsTable.tableStreamArn!,
     });
 
     // Create API Gateway
@@ -200,5 +255,14 @@ export class DevPortalApiStack extends cdk.Stack {
     
     const cleanup = webhookNotifications.addResource('cleanup');
     cleanup.addMethod('DELETE', new apigateway.LambdaIntegration(webhookNotificationsHandler));
+
+    // Add necessary outputs
+    new cdk.CfnOutput(this, 'GraphQLApiUrl', {
+      value: appSyncApi.graphqlUrl
+    });
+
+    new cdk.CfnOutput(this, 'GraphQLApiKey', {
+      value: appSyncApi.apiKey!
+    });
   }
 }

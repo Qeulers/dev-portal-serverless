@@ -1,0 +1,47 @@
+type Notification {
+  id: ID!
+  subscription_id: String!
+  timestamp: AWSDateTime!
+  message: String!
+  type: String!
+  ttl: Int
+}
+
+type Query {
+  getNotification(id: ID!): Notification
+  listNotifications(subscription_id: String!, limit: Int, nextToken: String): NotificationConnection
+}
+
+type NotificationConnection {
+  items: [Notification!]!
+  nextToken: String
+}
+
+type Mutation {
+  createNotification(input: CreateNotificationInput!): Notification
+  updateNotification(input: UpdateNotificationInput!): Notification
+  deleteNotification(id: ID!): Notification
+}
+
+input CreateNotificationInput {
+  id: ID!
+  subscription_id: String!
+  message: String!
+  type: String!
+  ttl: Int
+}
+
+input UpdateNotificationInput {
+  id: ID!
+  subscription_id: String
+  message: String
+  type: String
+  ttl: Int
+}
+
+type Subscription {
+  onNotificationCreated(subscription_id: String!): Notification
+    @aws_subscribe(mutations: ["createNotification"])
+  onNotificationUpdated(subscription_id: String!): Notification
+    @aws_subscribe(mutations: ["updateNotification"])
+}
