@@ -1,13 +1,14 @@
 // lib/dev-portal-api-stack.ts
 import * as cdk from 'aws-cdk-lib';
+import { Duration } from 'aws-cdk-lib';
 import * as apigateway from 'aws-cdk-lib/aws-apigateway';
 import * as lambda from 'aws-cdk-lib/aws-lambda-nodejs';
 import * as awsLambda from 'aws-cdk-lib/aws-lambda';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as appsync from '@aws-cdk/aws-appsync-alpha';
 import * as iam from 'aws-cdk-lib/aws-iam';
+import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as path from 'path';
-import { Duration } from 'aws-cdk-lib';
 
 export class DevPortalApiStack extends cdk.Stack {
   constructor(scope: cdk.App, id: string, props?: cdk.StackProps) {
@@ -81,6 +82,13 @@ export class DevPortalApiStack extends cdk.Stack {
       eventSourceArn: notificationsTable.tableStreamArn!,
     });
 
+    // Create S3 bucket for zone data
+    const zoneDataBucket = new s3.Bucket(this, 'ZoneDataBucket', {
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      encryption: s3.BucketEncryption.S3_MANAGED,
+    });
+
     // Create API Gateway
     const api = new apigateway.RestApi(this, 'DevPortalApi', {
       defaultCorsPreflightOptions: {
@@ -126,7 +134,13 @@ export class DevPortalApiStack extends cdk.Stack {
     const zoneAndPortHandler = new lambda.NodejsFunction(this, 'ZoneAndPortHandler', {
       entry: path.join(__dirname, '../lambda/zone-and-port/handler.ts'),
       handler: 'handler',
-      environment: commonEnvironment
+      runtime: awsLambda.Runtime.NODEJS_18_X,
+      memorySize: 512,  // Use 512MB for better free tier usage
+      timeout: Duration.seconds(30),  // Keep 30 second timeout
+      environment: {
+        BUCKET_NAME: zoneDataBucket.bucketName,
+        ...commonEnvironment
+      }
     });
 
     const voyageHandler = new lambda.NodejsFunction(this, 'VoyageHandler', {
@@ -155,9 +169,36 @@ export class DevPortalApiStack extends cdk.Stack {
       }
     });
 
+    const zoneAndPortGetHandler = new awsLambda.Function(this, 'ZoneAndPortGetHandler', {
+      runtime: awsLambda.Runtime.NODEJS_18_X,
+      handler: 'getHandler.handler',
+      code: awsLambda.Code.fromAsset(path.join(__dirname, '../lambda/zone-and-port')),
+      environment: {
+        BUCKET_NAME: zoneDataBucket.bucketName,
+      },
+      timeout: Duration.seconds(30),
+      memorySize: 512,
+    });
+
+    const zoneAndPortSearchHandler = new awsLambda.Function(this, 'ZoneAndPortSearchHandler', {
+      runtime: awsLambda.Runtime.NODEJS_18_X,
+      handler: 'searchHandler.handler',
+      code: awsLambda.Code.fromAsset(path.join(__dirname, '../lambda/zone-and-port')),
+      environment: {
+        BUCKET_NAME: zoneDataBucket.bucketName,
+      },
+      timeout: Duration.seconds(30),
+      memorySize: 512,
+    });
+
     // Grant Lambda permissions to DynamoDB
     notificationsTable.grantReadWriteData(zoneAndPortNotificationsHandler);
     notificationsTable.grantReadWriteData(webhookNotificationsHandler);
+
+    // Grant the Lambda function read access to the S3 bucket
+    zoneDataBucket.grantRead(zoneAndPortHandler);
+    zoneDataBucket.grantRead(zoneAndPortGetHandler);
+    zoneDataBucket.grantRead(zoneAndPortSearchHandler);
 
     // Create API routes
     const auth = api.root.addResource('account');
@@ -185,6 +226,11 @@ export class DevPortalApiStack extends cdk.Stack {
     zoneAndPortTrafficId.addResource('{id}')
       .addMethod('GET', new apigateway.LambdaIntegration(zoneAndPortHandler));
 
+    // Add new zones endpoint for CSV data
+    const zonesResource = api.root.addResource('zones');
+    zonesResource.addResource('{id}')
+      .addMethod('GET', new apigateway.LambdaIntegration(zoneAndPortHandler));
+
     // Vessels in Zone or Port endpoint
     const vesselsInZoneOrPort = zoneAndPortInsights.addResource('vessels-in-zone-or-port');
     const vesselsInZoneOrPortId = vesselsInZoneOrPort.addResource('id');
@@ -194,6 +240,10 @@ export class DevPortalApiStack extends cdk.Stack {
     // Zone & Port List endpoint
     const zones = zoneAndPortInsights.addResource('zones');
     zones.addMethod('GET', new apigateway.LambdaIntegration(zoneAndPortHandler));
+
+    // Search endpoint
+    const search = api.root.addResource('search');
+    search.addMethod('GET', new apigateway.LambdaIntegration(zoneAndPortSearchHandler));
 
     // Voyage Insights Routes
     const voyageInsights = api.root.addResource('voyage-insights');
@@ -263,6 +313,11 @@ export class DevPortalApiStack extends cdk.Stack {
 
     new cdk.CfnOutput(this, 'GraphQLApiKey', {
       value: appSyncApi.apiKey!
+    });
+
+    new cdk.CfnOutput(this, 'ZoneDataBucketName', {
+      value: zoneDataBucket.bucketName,
+      description: 'Name of the S3 bucket containing zone data'
     });
   }
 }

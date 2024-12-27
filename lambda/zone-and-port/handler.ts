@@ -1,12 +1,14 @@
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import axios, { AxiosError } from 'axios';
 import { getCorsHeaders, createOptionsResponse } from '../utils/cors';
+import { getRecordById } from './csvHandler';
 
 // Types
 interface EndpointConfig {
   method: 'GET' | 'POST' | 'PUT' | 'DELETE';
   path: string;
   handler: (event: APIGatewayProxyEvent, accessToken: string) => Promise<APIGatewayProxyResult>;
+  requiresAuth: boolean;
 }
 
 // Constants
@@ -146,22 +148,52 @@ const getZoneAndPortList = async (
   return createResponse(response.status, responseData);
 };
 
+const getZonePortById = async (
+  event: APIGatewayProxyEvent,
+  _accessToken: string
+): Promise<APIGatewayProxyResult> => {
+  try {
+    const id = event.pathParameters?.id;
+    if (!id) {
+      return createResponse(400, { error: 'ID is required' });
+    }
+
+    const record = await getRecordById(id);
+    if (!record) {
+      return createResponse(404, { error: 'Record not found' });
+    }
+
+    return createResponse(200, record);
+  } catch (error) {
+    return handleError(error);
+  }
+};
+
 // Route configuration
 const endpoints: EndpointConfig[] = [
   {
     method: 'GET',
+    path: '/zones/{id}',
+    handler: getZonePortById,
+    requiresAuth: false
+  },
+  {
+    method: 'GET',
     path: '/zone-and-port-insights/zone-and-port-traffic/id/',
-    handler: getZoneAndPortTraffic
+    handler: getZoneAndPortTraffic,
+    requiresAuth: true
   },
   {
     method: 'GET',
     path: '/zone-and-port-insights/vessels-in-zone-or-port/id/',
-    handler: getVesselsInZoneOrPort
+    handler: getVesselsInZoneOrPort,
+    requiresAuth: true
   },
   {
     method: 'GET',
     path: '/zone-and-port-insights/zones',
-    handler: getZoneAndPortList
+    handler: getZoneAndPortList,
+    requiresAuth: true
   }
 ];
 
@@ -169,29 +201,47 @@ const endpoints: EndpointConfig[] = [
 export const handler = async (
   event: APIGatewayProxyEvent
 ): Promise<APIGatewayProxyResult> => {
+  console.log('Received event:', JSON.stringify(event, null, 2));
+  
   // Handle OPTIONS requests for CORS preflight
   if (event.httpMethod === 'OPTIONS') {
     return createOptionsResponse();
   }
 
   try {
-    const accessToken = extractAccessToken(event);
-    if (!accessToken) {
-      return createResponse(401, { error: 'Access token is required' });
-    }
-
-    // Find matching endpoint
-    const endpoint = endpoints.find(e => 
-      e.method === event.httpMethod && 
-      event.path.includes(e.path)
-    );
+    // Find matching endpoint using path parameters
+    const endpoint = endpoints.find(e => {
+      if (e.method !== event.httpMethod) return false;
+      
+      // Convert endpoint path pattern to regex
+      const pathPattern = e.path.replace(/{[^/]+}/g, '[^/]+');
+      const pathRegex = new RegExp(`^${pathPattern}$`);
+      
+      const matches = pathRegex.test(event.path);
+      console.log(`Testing path "${event.path}" against pattern "${pathPattern}": ${matches}`);
+      return matches;
+    });
 
     if (!endpoint) {
+      console.log('No endpoint found for path:', event.path);
       return createResponse(404, { error: 'Endpoint not found' });
     }
 
-    return await endpoint.handler(event, accessToken);
+    console.log('Found matching endpoint:', endpoint.path);
+
+    // Check if endpoint requires authentication
+    if (endpoint.requiresAuth) {
+      const accessToken = extractAccessToken(event);
+      if (!accessToken) {
+        return createResponse(401, { error: 'Access token is required' });
+      }
+      return await endpoint.handler(event, accessToken);
+    }
+
+    // For endpoints that don't require auth
+    return await endpoint.handler(event, '');
   } catch (error) {
+    console.error('Error in handler:', error);
     return handleError(error);
   }
 };
