@@ -179,13 +179,13 @@ const endpoints: EndpointConfig[] = [
   },
   {
     method: 'GET',
-    path: '/zone-and-port-insights/zone-and-port-traffic/id/',
+    path: '/zone-and-port-insights/zone-and-port-traffic/id/{id}',
     handler: getZoneAndPortTraffic,
     requiresAuth: true
   },
   {
     method: 'GET',
-    path: '/zone-and-port-insights/vessels-in-zone-or-port/id/',
+    path: '/zone-and-port-insights/vessels-in-zone-or-port/id/{id}',
     handler: getVesselsInZoneOrPort,
     requiresAuth: true
   },
