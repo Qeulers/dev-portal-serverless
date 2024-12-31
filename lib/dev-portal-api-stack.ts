@@ -9,6 +9,7 @@ import * as appsync from '@aws-cdk/aws-appsync-alpha';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as path from 'path';
+import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 
 export class DevPortalApiStack extends cdk.Stack {
   constructor(scope: cdk.App, id: string, props?: cdk.StackProps) {
@@ -191,15 +192,32 @@ export class DevPortalApiStack extends cdk.Stack {
       memorySize: 512,
     });
 
+    // Create a secret for Polestar API credentials
+    const polestarApiSecret = new secretsmanager.Secret(this, 'PolestarApiSecret', {
+      description: 'Polestar API credentials for vessel search',
+      generateSecretString: {
+        secretStringTemplate: JSON.stringify({
+          username: 'PLACEHOLDER',
+          api_key: 'PLACEHOLDER'
+        }),
+        generateStringKey: 'dummy' // This key won't be used but is required
+      },
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    });
+
     const searchHandler = new awsLambda.Function(this, 'SearchHandler', {
       runtime: awsLambda.Runtime.NODEJS_18_X,
       handler: 'searchHandler.handler',
       code: awsLambda.Code.fromAsset(path.join(__dirname, '../lambda/search')),
       environment: {
         BUCKET_NAME: zoneDataBucket.bucketName,
+        POLESTAR_SECRET_ARN: polestarApiSecret.secretArn,
       },
       timeout: Duration.seconds(30),
     });
+
+    // Grant the Lambda function permission to read the secret
+    polestarApiSecret.grantRead(searchHandler);
 
     // Grant Lambda permissions to DynamoDB
     notificationsTable.grantReadWriteData(zoneAndPortNotificationsHandler);

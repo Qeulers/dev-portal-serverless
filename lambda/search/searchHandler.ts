@@ -1,5 +1,6 @@
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { search } from './csvHandler';
+import { searchVessels } from './vesselSearch';
 
 export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
     try {
@@ -20,8 +21,23 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
             };
         }
 
-        // Perform search
-        const result = await search(keyword);
+        // Perform parallel searches
+        const [zonePortResult, vessels] = await Promise.all([
+            search(keyword),
+            searchVessels(keyword)
+        ]);
+
+        // Combine results
+        const result = {
+            meta: {
+                ...zonePortResult.meta,
+                totalVessels: vessels.length
+            },
+            data: {
+                ...zonePortResult.data,
+                vessels
+            }
+        };
 
         return {
             statusCode: 200,
