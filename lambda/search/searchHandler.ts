@@ -4,8 +4,9 @@ import { searchVessels } from './vesselSearch';
 
 export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
     try {
-        // Get keyword from query parameters
+        // Get keyword and type from query parameters
         const keyword = event.queryStringParameters?.keyword;
+        const type = event.queryStringParameters?.type;
 
         // Validate keyword parameter
         if (!keyword) {
@@ -21,23 +22,60 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
             };
         }
 
-        // Perform parallel searches
-        const [zonePortResult, vessels] = await Promise.all([
-            search(keyword),
-            searchVessels(keyword)
-        ]);
+        // Validate type parameter if provided
+        if (type && !['vessels', 'ports', 'zones'].includes(type)) {
+            return {
+                statusCode: 400,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                },
+                body: JSON.stringify({
+                    error: 'Invalid type parameter. Must be one of: vessels, ports, zones'
+                })
+            };
+        }
 
-        // Combine results
-        const result = {
-            meta: {
-                ...zonePortResult.meta,
-                totalVessels: vessels.length
-            },
-            data: {
-                ...zonePortResult.data,
-                vessels
+        let result;
+
+        // Fetch data based on type parameter
+        if (!type || type === 'vessels') {
+            const vessels = await searchVessels(keyword);
+            if (type === 'vessels') {
+                result = {
+                    meta: {
+                        keyword,
+                        totalVessels: vessels.length
+                    },
+                    data: {
+                        vessels
+                    }
+                };
+            } else {
+                const zonePortResult = await search(keyword);
+                result = {
+                    meta: {
+                        ...zonePortResult.meta,
+                        totalVessels: vessels.length
+                    },
+                    data: {
+                        ...zonePortResult.data,
+                        vessels
+                    }
+                };
             }
-        };
+        } else {
+            // Only fetch ports and zones data
+            const zonePortResult = await search(keyword);
+            result = {
+                meta: {
+                    ...zonePortResult.meta
+                },
+                data: {
+                    [(type as 'ports' | 'zones')]: zonePortResult.data[type as 'ports' | 'zones']
+                }
+            };
+        }
 
         return {
             statusCode: 200,
