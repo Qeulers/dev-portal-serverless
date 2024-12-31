@@ -191,6 +191,16 @@ export class DevPortalApiStack extends cdk.Stack {
       memorySize: 512,
     });
 
+    const searchHandler = new awsLambda.Function(this, 'SearchHandler', {
+      runtime: awsLambda.Runtime.NODEJS_18_X,
+      handler: 'searchHandler.handler',
+      code: awsLambda.Code.fromAsset(path.join(__dirname, '../lambda/search')),
+      environment: {
+        BUCKET_NAME: zoneDataBucket.bucketName,
+      },
+      timeout: Duration.seconds(30),
+    });
+
     // Grant Lambda permissions to DynamoDB
     notificationsTable.grantReadWriteData(zoneAndPortNotificationsHandler);
     notificationsTable.grantReadWriteData(webhookNotificationsHandler);
@@ -199,6 +209,7 @@ export class DevPortalApiStack extends cdk.Stack {
     zoneDataBucket.grantRead(zoneAndPortHandler);
     zoneDataBucket.grantRead(zoneAndPortGetHandler);
     zoneDataBucket.grantRead(zoneAndPortSearchHandler);
+    zoneDataBucket.grantRead(searchHandler);
 
     // Create API routes
     const auth = api.root.addResource('account');
@@ -243,7 +254,7 @@ export class DevPortalApiStack extends cdk.Stack {
 
     // Search endpoint
     const search = api.root.addResource('search');
-    search.addMethod('GET', new apigateway.LambdaIntegration(zoneAndPortSearchHandler));
+    search.addMethod('GET', new apigateway.LambdaIntegration(searchHandler));
 
     // Voyage Insights Routes
     const voyageInsights = api.root.addResource('voyage-insights');
