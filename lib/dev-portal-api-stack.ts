@@ -137,9 +137,10 @@ export class DevPortalApiStack extends cdk.Stack {
       handler: 'handler',
       runtime: awsLambda.Runtime.NODEJS_18_X,
       memorySize: 512,  // Use 512MB for better free tier usage
-      timeout: Duration.seconds(30),  // Keep 30 second timeout
+      timeout: Duration.seconds(120),  // Keep Lambda timeout at 120 seconds for processing
       environment: {
         BUCKET_NAME: zoneDataBucket.bucketName,
+        MAX_RECORDS_LIMIT: process.env.MAX_RECORDS_LIMIT || '5000',
         ...commonEnvironment
       }
     });
@@ -147,7 +148,12 @@ export class DevPortalApiStack extends cdk.Stack {
     const voyageHandler = new lambda.NodejsFunction(this, 'VoyageHandler', {
       entry: path.join(__dirname, '../lambda/voyage/handler.ts'),
       handler: 'handler',
-      environment: commonEnvironment
+      runtime: awsLambda.Runtime.NODEJS_18_X,
+      timeout: Duration.seconds(120),  // Set timeout to 120 seconds for processing large datasets
+      environment: {
+        MAX_RECORDS_LIMIT: process.env.MAX_RECORDS_LIMIT || '5000',
+        ...commonEnvironment
+      }
     });
 
     const zoneAndPortNotificationsHandler = new lambda.NodejsFunction(this, 'ZoneAndPortNotificationsHandler', {
@@ -263,8 +269,10 @@ export class DevPortalApiStack extends cdk.Stack {
     // Vessels in Zone or Port endpoint
     const vesselsInZoneOrPort = zoneAndPortInsights.addResource('vessels-in-zone-or-port');
     const vesselsInZoneOrPortId = vesselsInZoneOrPort.addResource('id');
-    vesselsInZoneOrPortId.addResource('{id}')
-      .addMethod('GET', new apigateway.LambdaIntegration(zoneAndPortHandler));
+    const vesselsInZoneOrPortIdWithId = vesselsInZoneOrPortId.addResource('{id}');
+    vesselsInZoneOrPortIdWithId.addMethod('GET', new apigateway.LambdaIntegration(zoneAndPortHandler, {
+      timeout: Duration.millis(29000)  // Set to API Gateway maximum timeout
+    }));
 
     // Zone & Port List endpoint
     const zones = zoneAndPortInsights.addResource('zones');
@@ -280,27 +288,37 @@ export class DevPortalApiStack extends cdk.Stack {
     // Vessel Port Calls endpoint
     const vesselPortCalls = voyageInsights.addResource('vessel-port-calls');
     vesselPortCalls.addResource('{imo}')
-      .addMethod('GET', new apigateway.LambdaIntegration(voyageHandler));
+      .addMethod('GET', new apigateway.LambdaIntegration(voyageHandler, {
+        timeout: Duration.millis(29000)  // Set to API Gateway maximum timeout
+      }));
 
     // Vessel Zone and Port Events endpoint
     const vesselZoneAndPortEvents = voyageInsights.addResource('vessel-zone-and-port-events');
     vesselZoneAndPortEvents.addResource('{imo}')
-      .addMethod('GET', new apigateway.LambdaIntegration(voyageHandler));
+      .addMethod('GET', new apigateway.LambdaIntegration(voyageHandler, {
+        timeout: Duration.millis(29000)  // Set to API Gateway maximum timeout
+      }));
 
     // Vessel AIS Reporting Gaps endpoint
     const vesselAisReportingGaps = voyageInsights.addResource('vessel-ais-reporting-gaps');
     vesselAisReportingGaps.addResource('{imo}')
-      .addMethod('GET', new apigateway.LambdaIntegration(voyageHandler));
+      .addMethod('GET', new apigateway.LambdaIntegration(voyageHandler, {
+        timeout: Duration.millis(29000)  // Set to API Gateway maximum timeout
+      }));
 
     // Vessel Positional Discrepancies endpoint
     const vesselPositionalDiscrepancies = voyageInsights.addResource('vessel-positional-discrepancies');
     vesselPositionalDiscrepancies.addResource('{imo}')
-      .addMethod('GET', new apigateway.LambdaIntegration(voyageHandler));
+      .addMethod('GET', new apigateway.LambdaIntegration(voyageHandler, {
+        timeout: Duration.millis(29000)  // Set to API Gateway maximum timeout
+      }));
 
     // Vessel Port State Control endpoint
     const vesselPortStateControl = voyageInsights.addResource('vessel-port-state-control');
     vesselPortStateControl.addResource('{imo}')
-      .addMethod('GET', new apigateway.LambdaIntegration(voyageHandler));
+      .addMethod('GET', new apigateway.LambdaIntegration(voyageHandler, {
+        timeout: Duration.millis(29000)  // Set to API Gateway maximum timeout
+      }));
 
     // Zone and Port Notification endpoints
     const notifications = api.root.addResource('notifications');

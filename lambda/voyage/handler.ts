@@ -2,6 +2,9 @@ import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import axios, { AxiosError } from 'axios';
 import { getCorsHeaders, createOptionsResponse } from '../utils/cors';
 
+// Constants
+const MAX_RECORDS_LIMIT = parseInt(process.env.MAX_RECORDS_LIMIT || '5000', 10);
+
 // Types
 interface EndpointConfig {
   method: 'GET' | 'POST' | 'PUT' | 'DELETE';
@@ -56,27 +59,83 @@ const getVesselPortCalls = async (
   }
 
   const queryParams = event.queryStringParameters || {};
+  const getAll = queryParams.get_all === 'true';
+
   const baseUrl = 'https://zone-service-api.polestar-production.com/voyage-insights/v1/vessel-port-calls/:imo';
   const targetUrl = new URL(baseUrl.replace(':imo', imo));
   
   Object.entries(queryParams).forEach(([key, value]) => {
-    if (value !== undefined) {
+    if (value !== undefined && key !== 'get_all') {
       targetUrl.searchParams.append(key, value);
     }
   });
 
-  const response = await axios.get(targetUrl.toString(), {
+  // Make initial API call
+  const initialResponse = await axios.get(targetUrl.toString(), {
     headers: { 'Authorization': `Bearer ${accessToken}` }
   });
 
-  const responseData = response.data;
+  let responseData = initialResponse.data;
   if (!responseData.meta) {
     responseData.meta = {};
   }
-  responseData.meta.status_code = response.status;
-  responseData.meta.status_message = response.statusText;
+  responseData.meta.status_code = initialResponse.status;
+  responseData.meta.status_message = initialResponse.statusText;
 
-  return createResponse(response.status, responseData);
+  // If get_all is false or no pagination info, return initial response
+  if (!getAll || !responseData.meta.total_count || !responseData.meta.limit) {
+    return createResponse(initialResponse.status, responseData);
+  }
+
+  const totalCount = responseData.meta.total_count;
+  const limit = responseData.meta.limit;
+
+  // Check if total count exceeds maximum limit
+  if (totalCount > MAX_RECORDS_LIMIT) {
+    return createResponse(413, {
+      error: "Request exceeds maximum record limit",
+      message: `The total number of records (${totalCount}) exceeds the maximum limit of ${MAX_RECORDS_LIMIT}. Please refine your query parameters to return fewer results.`
+    });
+  }
+
+  // If total count is less than or equal to limit, return initial response
+  if (totalCount <= limit) {
+    return createResponse(initialResponse.status, responseData);
+  }
+
+  // Calculate number of additional requests needed
+  const totalRequests = Math.ceil(totalCount / limit);
+  const remainingRequests = totalRequests - 1; // Subtract 1 for initial request
+
+  try {
+    // Make additional API calls
+    for (let i = 1; i <= remainingRequests; i++) {
+      const offset = i * limit;
+      targetUrl.searchParams.set('offset', offset.toString());
+
+      const additionalResponse = await axios.get(targetUrl.toString(), {
+        headers: { 'Authorization': `Bearer ${accessToken}` }
+      });
+
+      // Append port calls from additional response to initial response
+      if (additionalResponse.data?.data?.port_calls) {
+        responseData.data.port_calls.push(...additionalResponse.data.data.port_calls);
+      }
+    }
+
+    return createResponse(initialResponse.status, responseData);
+  } catch (error) {
+    if (error instanceof AxiosError) {
+      return createResponse(error.response?.status || 500, {
+        error: "Error fetching additional records",
+        message: error.message
+      });
+    }
+    return createResponse(500, {
+      error: "Internal server error",
+      message: "An unexpected error occurred while fetching additional records"
+    });
+  }
 };
 
 const getVesselZoneAndPortEvents = async (
@@ -89,27 +148,83 @@ const getVesselZoneAndPortEvents = async (
   }
 
   const queryParams = event.queryStringParameters || {};
+  const getAll = queryParams.get_all === 'true';
+
   const baseUrl = 'https://zone-service-api.polestar-production.com/voyage-insights/v1/vessel-zone-and-port-events/:imo';
   const targetUrl = new URL(baseUrl.replace(':imo', imo));
   
   Object.entries(queryParams).forEach(([key, value]) => {
-    if (value !== undefined) {
+    if (value !== undefined && key !== 'get_all') {
       targetUrl.searchParams.append(key, value);
     }
   });
 
-  const response = await axios.get(targetUrl.toString(), {
+  // Make initial API call
+  const initialResponse = await axios.get(targetUrl.toString(), {
     headers: { 'Authorization': `Bearer ${accessToken}` }
   });
 
-  const responseData = response.data;
+  let responseData = initialResponse.data;
   if (!responseData.meta) {
     responseData.meta = {};
   }
-  responseData.meta.status_code = response.status;
-  responseData.meta.status_message = response.statusText;
+  responseData.meta.status_code = initialResponse.status;
+  responseData.meta.status_message = initialResponse.statusText;
 
-  return createResponse(response.status, responseData);
+  // If get_all is false or no pagination info, return initial response
+  if (!getAll || !responseData.meta.total_count || !responseData.meta.limit) {
+    return createResponse(initialResponse.status, responseData);
+  }
+
+  const totalCount = responseData.meta.total_count;
+  const limit = responseData.meta.limit;
+
+  // Check if total count exceeds maximum limit
+  if (totalCount > MAX_RECORDS_LIMIT) {
+    return createResponse(413, {
+      error: "Request exceeds maximum record limit",
+      message: `The total number of records (${totalCount}) exceeds the maximum limit of ${MAX_RECORDS_LIMIT}. Please refine your query parameters to return fewer results.`
+    });
+  }
+
+  // If total count is less than or equal to limit, return initial response
+  if (totalCount <= limit) {
+    return createResponse(initialResponse.status, responseData);
+  }
+
+  // Calculate number of additional requests needed
+  const totalRequests = Math.ceil(totalCount / limit);
+  const remainingRequests = totalRequests - 1; // Subtract 1 for initial request
+
+  try {
+    // Make additional API calls
+    for (let i = 1; i <= remainingRequests; i++) {
+      const offset = i * limit;
+      targetUrl.searchParams.set('offset', offset.toString());
+
+      const additionalResponse = await axios.get(targetUrl.toString(), {
+        headers: { 'Authorization': `Bearer ${accessToken}` }
+      });
+
+      // Append events from additional response to initial response
+      if (additionalResponse.data?.data?.events) {
+        responseData.data.events.push(...additionalResponse.data.data.events);
+      }
+    }
+
+    return createResponse(initialResponse.status, responseData);
+  } catch (error) {
+    if (error instanceof AxiosError) {
+      return createResponse(error.response?.status || 500, {
+        error: "Error fetching additional records",
+        message: error.message
+      });
+    }
+    return createResponse(500, {
+      error: "Internal server error",
+      message: "An unexpected error occurred while fetching additional records"
+    });
+  }
 };
 
 const getVesselAisReportingGaps = async (
@@ -122,27 +237,83 @@ const getVesselAisReportingGaps = async (
   }
 
   const queryParams = event.queryStringParameters || {};
+  const getAll = queryParams.get_all === 'true';
+
   const baseUrl = 'https://gap-reporting-api-public.polestar-production.com/voyage-insights/v1/vessel-ais-reporting-gaps/:imo';
   const targetUrl = new URL(baseUrl.replace(':imo', imo));
   
   Object.entries(queryParams).forEach(([key, value]) => {
-    if (value !== undefined) {
+    if (value !== undefined && key !== 'get_all') {
       targetUrl.searchParams.append(key, value);
     }
   });
 
-  const response = await axios.get(targetUrl.toString(), {
+  // Make initial API call
+  const initialResponse = await axios.get(targetUrl.toString(), {
     headers: { 'Authorization': `Bearer ${accessToken}` }
   });
 
-  const responseData = response.data;
+  let responseData = initialResponse.data;
   if (!responseData.meta) {
     responseData.meta = {};
   }
-  responseData.meta.status_code = response.status;
-  responseData.meta.status_message = response.statusText;
+  responseData.meta.status_code = initialResponse.status;
+  responseData.meta.status_message = initialResponse.statusText;
 
-  return createResponse(response.status, responseData);
+  // If get_all is false or no pagination info, return initial response
+  if (!getAll || !responseData.meta.total_count || !responseData.meta.limit) {
+    return createResponse(initialResponse.status, responseData);
+  }
+
+  const totalCount = responseData.meta.total_count;
+  const limit = responseData.meta.limit;
+
+  // Check if total count exceeds maximum limit
+  if (totalCount > MAX_RECORDS_LIMIT) {
+    return createResponse(413, {
+      error: "Request exceeds maximum record limit",
+      message: `The total number of records (${totalCount}) exceeds the maximum limit of ${MAX_RECORDS_LIMIT}. Please refine your query parameters to return fewer results.`
+    });
+  }
+
+  // If total count is less than or equal to limit, return initial response
+  if (totalCount <= limit) {
+    return createResponse(initialResponse.status, responseData);
+  }
+
+  // Calculate number of additional requests needed
+  const totalRequests = Math.ceil(totalCount / limit);
+  const remainingRequests = totalRequests - 1; // Subtract 1 for initial request
+
+  try {
+    // Make additional API calls
+    for (let i = 1; i <= remainingRequests; i++) {
+      const offset = i * limit;
+      targetUrl.searchParams.set('offset', offset.toString());
+
+      const additionalResponse = await axios.get(targetUrl.toString(), {
+        headers: { 'Authorization': `Bearer ${accessToken}` }
+      });
+
+      // Append gaps from additional response to initial response
+      if (additionalResponse.data?.data?.gaps) {
+        responseData.data.gaps.push(...additionalResponse.data.data.gaps);
+      }
+    }
+
+    return createResponse(initialResponse.status, responseData);
+  } catch (error) {
+    if (error instanceof AxiosError) {
+      return createResponse(error.response?.status || 500, {
+        error: "Error fetching additional records",
+        message: error.message
+      });
+    }
+    return createResponse(500, {
+      error: "Internal server error",
+      message: "An unexpected error occurred while fetching additional records"
+    });
+  }
 };
 
 const getVesselPositionalDiscrepancies = async (
@@ -155,27 +326,83 @@ const getVesselPositionalDiscrepancies = async (
   }
 
   const queryParams = event.queryStringParameters || {};
+  const getAll = queryParams.get_all === 'true';
+
   const baseUrl = 'https://ais-spoofing-api-public.polestar-production.com/voyage-insights/v1/vessel-positional-discrepancy/:imo';
   const targetUrl = new URL(baseUrl.replace(':imo', imo));
   
   Object.entries(queryParams).forEach(([key, value]) => {
-    if (value !== undefined) {
+    if (value !== undefined && key !== 'get_all') {
       targetUrl.searchParams.append(key, value);
     }
   });
 
-  const response = await axios.get(targetUrl.toString(), {
+  // Make initial API call
+  const initialResponse = await axios.get(targetUrl.toString(), {
     headers: { 'Authorization': `Bearer ${accessToken}` }
   });
 
-  const responseData = response.data;
+  let responseData = initialResponse.data;
   if (!responseData.meta) {
     responseData.meta = {};
   }
-  responseData.meta.status_code = response.status;
-  responseData.meta.status_message = response.statusText;
+  responseData.meta.status_code = initialResponse.status;
+  responseData.meta.status_message = initialResponse.statusText;
 
-  return createResponse(response.status, responseData);
+  // If get_all is false or no pagination info, return initial response
+  if (!getAll || !responseData.meta.total_count || !responseData.meta.limit) {
+    return createResponse(initialResponse.status, responseData);
+  }
+
+  const totalCount = responseData.meta.total_count;
+  const limit = responseData.meta.limit;
+
+  // Check if total count exceeds maximum limit
+  if (totalCount > MAX_RECORDS_LIMIT) {
+    return createResponse(413, {
+      error: "Request exceeds maximum record limit",
+      message: `The total number of records (${totalCount}) exceeds the maximum limit of ${MAX_RECORDS_LIMIT}. Please refine your query parameters to return fewer results.`
+    });
+  }
+
+  // If total count is less than or equal to limit, return initial response
+  if (totalCount <= limit) {
+    return createResponse(initialResponse.status, responseData);
+  }
+
+  // Calculate number of additional requests needed
+  const totalRequests = Math.ceil(totalCount / limit);
+  const remainingRequests = totalRequests - 1; // Subtract 1 for initial request
+
+  try {
+    // Make additional API calls
+    for (let i = 1; i <= remainingRequests; i++) {
+      const offset = i * limit;
+      targetUrl.searchParams.set('offset', offset.toString());
+
+      const additionalResponse = await axios.get(targetUrl.toString(), {
+        headers: { 'Authorization': `Bearer ${accessToken}` }
+      });
+
+      // Append discrepancies from additional response to initial response
+      if (additionalResponse.data?.data?.discrepancies) {
+        responseData.data.discrepancies.push(...additionalResponse.data.data.discrepancies);
+      }
+    }
+
+    return createResponse(initialResponse.status, responseData);
+  } catch (error) {
+    if (error instanceof AxiosError) {
+      return createResponse(error.response?.status || 500, {
+        error: "Error fetching additional records",
+        message: error.message
+      });
+    }
+    return createResponse(500, {
+      error: "Internal server error",
+      message: "An unexpected error occurred while fetching additional records"
+    });
+  }
 };
 
 const getVesselPortStateControl = async (
@@ -188,27 +415,83 @@ const getVesselPortStateControl = async (
   }
 
   const queryParams = event.queryStringParameters || {};
+  const getAll = queryParams.get_all === 'true';
+
   const baseUrl = 'https://psc-insp-service-api-public.polestar-production.com/voyage-insights/v1/vessel-port-state-control/:imo';
   const targetUrl = new URL(baseUrl.replace(':imo', imo));
   
   Object.entries(queryParams).forEach(([key, value]) => {
-    if (value !== undefined) {
+    if (value !== undefined && key !== 'get_all') {
       targetUrl.searchParams.append(key, value);
     }
   });
 
-  const response = await axios.get(targetUrl.toString(), {
+  // Make initial API call
+  const initialResponse = await axios.get(targetUrl.toString(), {
     headers: { 'Authorization': `Bearer ${accessToken}` }
   });
 
-  const responseData = response.data;
+  let responseData = initialResponse.data;
   if (!responseData.meta) {
     responseData.meta = {};
   }
-  responseData.meta.status_code = response.status;
-  responseData.meta.status_message = response.statusText;
+  responseData.meta.status_code = initialResponse.status;
+  responseData.meta.status_message = initialResponse.statusText;
 
-  return createResponse(response.status, responseData);
+  // If get_all is false or no pagination info, return initial response
+  if (!getAll || !responseData.meta.total_count || !responseData.meta.limit) {
+    return createResponse(initialResponse.status, responseData);
+  }
+
+  const totalCount = responseData.meta.total_count;
+  const limit = responseData.meta.limit;
+
+  // Check if total count exceeds maximum limit
+  if (totalCount > MAX_RECORDS_LIMIT) {
+    return createResponse(413, {
+      error: "Request exceeds maximum record limit",
+      message: `The total number of records (${totalCount}) exceeds the maximum limit of ${MAX_RECORDS_LIMIT}. Please refine your query parameters to return fewer results.`
+    });
+  }
+
+  // If total count is less than or equal to limit, return initial response
+  if (totalCount <= limit) {
+    return createResponse(initialResponse.status, responseData);
+  }
+
+  // Calculate number of additional requests needed
+  const totalRequests = Math.ceil(totalCount / limit);
+  const remainingRequests = totalRequests - 1; // Subtract 1 for initial request
+
+  try {
+    // Make additional API calls
+    for (let i = 1; i <= remainingRequests; i++) {
+      const offset = i * limit;
+      targetUrl.searchParams.set('offset', offset.toString());
+
+      const additionalResponse = await axios.get(targetUrl.toString(), {
+        headers: { 'Authorization': `Bearer ${accessToken}` }
+      });
+
+      // Append inspections from additional response to initial response
+      if (additionalResponse.data?.data?.inspections) {
+        responseData.data.inspections.push(...additionalResponse.data.data.inspections);
+      }
+    }
+
+    return createResponse(initialResponse.status, responseData);
+  } catch (error) {
+    if (error instanceof AxiosError) {
+      return createResponse(error.response?.status || 500, {
+        error: "Error fetching additional records",
+        message: error.message
+      });
+    }
+    return createResponse(500, {
+      error: "Internal server error",
+      message: "An unexpected error occurred while fetching additional records"
+    });
+  }
 };
 
 // Route configuration
